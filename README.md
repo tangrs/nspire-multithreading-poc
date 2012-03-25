@@ -6,6 +6,8 @@ This library will most likely appeal to developers of Ndless who can take advant
 
 Unfortunately, this is a quick and dirty solution. It doesn't perform as optimally as it could have. Atomic reads/writes are achieved by turning interrupts on and off. I'll refine it as I need it.
 
+It's also only working on the CX. Will get around to getting it working on the older models soon.
+
 ## Features
 
 This threading POC does basic context switches between each thread giving them all equal priority.
