@@ -1,0 +1,5 @@
+.DS_Store
+disassembly.txt
+*.tns
+*.elf
+*.o
