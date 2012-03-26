@@ -1,6 +1,7 @@
 #include <os.h>
 #include "interrupt.h"
 #include "threading.h"
+#include "atomic.h"
 
 #define XSTRING(a) #a
 #define STRING(a) XSTRING(a)
@@ -221,7 +222,7 @@ static unsigned* context_switch(unsigned * reg_list, unsigned * cpsr) {
 static void update_state_deltas() {
     state_link_t* next = state_list;
     while (next) {
-        if (next->state.sleep > 0) next->state.sleep--;
+        if (next->state.sleep > 0) next->state.sleep-=TIMER_LOAD_VALUE;
         next = next->next;
     }
 }
@@ -293,9 +294,7 @@ static void thread_run_wrapper( void(*thread_func)(unsigned, void*), unsigned th
     thread_func(thread_id, userdata);
 
     /* tell context switcher the current thread has finished */
-    set_interrupt_off();
-    want_out = 1;
-    set_interrupt_on();
+    atomic_w32(&want_out,1);
 
     /* wait to be switched out */
     while (1) {
