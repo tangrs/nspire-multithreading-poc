@@ -2,59 +2,56 @@
 #include "interrupt.h"
 
 
-static unsigned* (*handler_func)(unsigned*,unsigned*);
+extern unsigned* (*int_handler_func)(unsigned*,unsigned*);
 static unsigned orig_addr, orig_int_mask;
 static void* stack_base;
 
 /* should be reentrant... hopefully */
-static void __attribute__((naked)) int_handler() {
+static void __attribute__((naked,noreturn)) int_handler() {
     /* interrupts disabled as of here */
-    extern unsigned * saved_reg_ptr;
-    extern unsigned saved_cpsr;
-        asm(
-            "b 0f \n"
-            "saved_pc: .word 0 \n"
-            "saved_reg_ptr: .word 0 \n"
-            "saved_cpsr: .word 0 \n"
-            "handler_stack: .word 0 \n"
-            "0: \n"
-            "push {r0} \n"
-            "sub r0, lr, #4 \n"
-            "str r0, saved_pc \n" /* save return address of interrupt handler */
-            "mrs r0, spsr \n"
-            "str r0, saved_cpsr \n"
-            "orr r0, r0, #0x80 \n" /* disable interrupts on return to svc mode */
-            "msr spsr_c, r0 \n"
-            "pop {r0} \n"
-            "subs pc, pc, #4 \n"
-        /* back to original context */
-        /* leech off the stack of the context */
-            "sub sp, sp, #64 \n"
-            "str r0, [sp] \n" /* save r0 first to get a temporary register */
-            "mov r0, lr \n"
-            "str r0, [sp, #56] \n" /* save lr */
-            "ldr r0, saved_pc \n"
-            "str r0, [sp, #60] \n" /* save pc */
-            "add r0, sp, #64 \n"
-            "str r0, [sp, #52] \n" /* save sp */
-            "add sp, sp, #4 \n"
-            "stm sp, {r1-r12} \n" /* save the rest */
-            "sub sp, sp, #4 \n"
-            "mov r0, sp \n"
-            /*  stack should have registers all in order ready
-                to restore state by a simple ldm call */
-            "str r0, saved_reg_ptr \n"
-            "ldr r0, handler_stack \n"
-            "mov sp, r0 \n"
-        );
-        saved_reg_ptr = handler_func(saved_reg_ptr, &saved_cpsr);
-        asm(
-            "ldr r1, saved_reg_ptr \n"
-            "ldr r0, saved_cpsr \n"
-            "msr cpsr_cxsf, r0 \n" /* reenable interrupts */
-    /* interrupts enabled as of here */
+    asm(
+        "b 0f \n"
+        "int_restore_cpsr: .word 0 \n"
+        "int_handler_stack: .word 0 \n"
+        "int_handler_func: .word 0 \n"
+        "0: \n"
+        /* begin saving state */
+        "push {r12} \n"
+        "ldr r12, int_handler_stack \n"
+        "sub r12, r12, #64 \n"
+        /* save register r15 (stored in lr in interrupt mode) */
+        "sub lr, lr, #4 \n"
+        "str lr, [r12, #60] \n"
+        /* save registers r0-r11 */
+        "stm r12, {r0-r11} \n"
+        /* save r12 */
+        "pop {r0} \n"
+        "str r0, [r12, #48] \n"
+        /* save cpsr */
+        "mrs r0, spsr \n"
+        "str r0, int_restore_cpsr \n"
+        /* enter a interrupt-disabled state on return to svc mode */
+        "mov r0, #0xD3 \n"
+        "msr spsr_cxsf, r0 \n"
+        /* go back to svc mode to save remaining registers */
+        "subs pc, pc, #4 \n"
+        /* save r13 and r14 */
+        "add r12, r12, #52 \n"
+        "stm r12, {r13, r14} \n"
+        /* all registers should be stored in sequential order on the stack now */
+        /* set up interrupt environment */
+        "sub sp, r12, #52 \n"
+        /* call handler function */
+        "mov r0, sp \n" /* (unsigned *saved_regs) */
+        "adr r1, int_restore_cpsr \n" /* (unsigned *saved_cpsr) */
+        "mov lr, pc \n"
+        "ldr pc, int_handler_func \n"
+        /* handler run, now restore state */
+        "ldr r1, int_restore_cpsr \n"
+        "msr cpsr_cxsf, r1 \n" /* reenable interrupts */
         /* restore context */
-        "ldm r1,{r0-r15} \n"
+        "ldm r0,{r0-r15} \n"
+        /* if interrupted here, it should restart from the beginning and cause no big dramas */
     );
     __builtin_unreachable();
 }
@@ -88,17 +85,17 @@ void set_interrupt_off() {
 
 void init_interrupts(unsigned* (*func)(unsigned*,unsigned*)) {
     /* setup handler stack */
-    extern void *handler_stack;
+    extern void *int_handler_stack;
     stack_base = malloc(0x80000);
     if (!stack_base) return;
 
-    handler_stack = (char*)stack_base + 0x80000;
+    int_handler_stack = (char*)stack_base + 0x80000;
 
     /* set interrupt mask */
     set_interrupt_mask();
 
     /* set handler function to handle the interrupt */
-    handler_func = func;
+    int_handler_func = func;
 
     /* patch vector */
     volatile unsigned *vector_jump = (volatile unsigned *)0x38;
