@@ -294,7 +294,7 @@ static void thread_run_wrapper( void(*thread_func)(unsigned, void*), unsigned th
     thread_func(thread_id, userdata);
 
     /* tell context switcher the current thread has finished */
-    atomic_w32(&want_out,1);
+    want_out = 1;
 
     /* wait to be switched out */
     while (1) {
